@@ -6,6 +6,15 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Generalized note plaintext size to support variable note sizes, including
+  AssetId for ZSA notes. Moved constants into `Domain` trait implementations
+  (e.g., `OrchardDomain`, `Sapling`).
+- Added abstract types `NotePlaintextBytes`, `NoteCiphertextBytes`,
+  `CompactNotePlaintextBytes`, and `CompactNoteCiphertextBytes` to `Domain`
+  trait.
+- Updated function signatures to remove constants that are unknown at
+  compilation time.
 
 ## [0.4.0] - 2023-06-06
 ### Changed
