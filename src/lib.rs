@@ -50,7 +50,7 @@ pub const COMPACT_NOTE_SIZE: usize = 1 + // version
     11 + // diversifier
     8  + // value
     32; // rseed (or rcm prior to ZIP 212)
-/// The size of [`NotePlaintextBytes`].
+/// The size of NotePlaintextBytes.
 pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
 /// The size of an encrypted note plaintext.
 pub const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
