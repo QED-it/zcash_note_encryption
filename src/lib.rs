@@ -138,9 +138,14 @@ pub trait Domain {
     type ExtractedCommitmentBytes: Eq + for<'a> From<&'a Self::ExtractedCommitment>;
     type Memo;
 
-    type NotePlaintextBytes: AsMut<[u8]> + for<'a> From<&'a [u8]>;
-    type NoteCiphertextBytes: AsMut<[u8]> + for<'a> From<(&'a [u8], &'a [u8])>;
-    type CompactNotePlaintextBytes: AsMut<[u8]> + for<'a> From<&'a [u8]>;
+    // FIXME: having four new parse_... methods of the trait cause a code duplication in
+    // the trait implementation. Now we use NoteBytes trait that constainted by all thoose ArRef,
+    // AsMut, From and NoteBytesData generic struct that implement NoteBytes for any length
+    type NotePlaintextBytes: AsMut<[u8]>;
+    // FIXME: [u8; AEAD_TAG_SIZE] instead of &[u8] doesn't give any benefit (except type/size
+    // safety) as we will need to allocalte memory for NoteCiphertextBytes anyway
+    type NoteCiphertextBytes: AsRef<[u8]>;
+    type CompactNotePlaintextBytes: AsMut<[u8]> + From<&[u8>>;//Self::CompactNoteCiphertextBytes>;
     type CompactNoteCiphertextBytes: AsRef<[u8]>;
 
     /// Derives the `EphemeralSecretKey` corresponding to this note.
@@ -261,7 +266,7 @@ pub trait Domain {
     ///
     /// `&self` is passed here in anticipation of future changes to memo handling, where
     /// the memos may no longer be part of the note plaintext.
-    fn extract_memo(
+    fn split_plaintext_at_memo(
         &self,
         plaintext: &Self::NotePlaintextBytes,
     ) -> (Self::CompactNotePlaintextBytes, Self::Memo);
@@ -277,6 +282,15 @@ pub trait Domain {
     /// Returns `None` if `out_plaintext` does not contain a valid byte encoding of an
     /// `EphemeralSecretKey`.
     fn extract_esk(out_plaintext: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey>;
+
+    // FIXME: add doc
+    fn parse_note_plaintext_bytes(plaintext: &[u8]) -> Option<Self::NotePlaintextBytes>;
+
+    // FIXME: add doc
+    fn parse_note_ciphertext_bytes(
+        output: &[u8],
+        tag: [u8; AEAD_TAG_SIZE],
+    ) -> Option<Self::NoteCiphertextBytes>;
 }
 
 /// Trait that encapsulates protocol-specific batch trial decryption logic.
@@ -333,6 +347,8 @@ pub trait ShieldedOutput<D: Domain> {
     /// Exposes the note ciphertext of the output. Returns `None` if the output is compact.
     fn enc_ciphertext(&self) -> Option<D::NoteCiphertextBytes>;
 
+    // FIXME: we can't return a ref to CompactNoteCiphertextBytes as it's not a member or self or
+    // a static object
     /// Exposes the compact note ciphertext of the output.
     fn enc_ciphertext_compact(&self) -> D::CompactNoteCiphertextBytes;
 }
@@ -410,7 +426,7 @@ impl<D: Domain> NoteEncryption<D> {
         let tag = ChaCha20Poly1305::new(key.as_ref().into())
             .encrypt_in_place_detached([0u8; 12][..].into(), &[], output)
             .unwrap();
-        D::NoteCiphertextBytes::from((output, tag.as_ref()))
+        D::parse_note_ciphertext_bytes(output, tag.into()).expect("output is correct length")
     }
 
     /// Generates `outCiphertext` for this note.
@@ -476,16 +492,13 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     output: &Output,
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    let mut enc_ciphertext = output.enc_ciphertext()?;
-    let enc_ciphertext_ref = enc_ciphertext.as_mut();
-
-    let (plaintext, tag) = extract_tag(enc_ciphertext_ref);
+    let (mut plaintext, tag) = extract_tag::<D>(&output.enc_ciphertext()?)?;
 
     ChaCha20Poly1305::new(key.as_ref().into())
-        .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext, &tag.into())
+        .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
         .ok()?;
 
-    let (compact, memo) = domain.extract_memo(&D::NotePlaintextBytes::from(plaintext));
+    let (compact, memo) = domain.split_plaintext_at_memo(&plaintext);
     let (note, to) = parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
@@ -571,8 +584,7 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient)> {
     // Start from block 1 to skip over Poly1305 keying output
-    let mut plaintext: D::CompactNotePlaintextBytes =
-        output.enc_ciphertext_compact().as_ref().into();
+    let mut plaintext: D::CompactNotePlaintextBytes = output.enc_ciphertext_compact().into();
 
     let mut keystream = ChaCha20::new(key.as_ref().into(), [0u8; 12][..].into());
     keystream.seek(64);
@@ -644,16 +656,13 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    let mut enc_ciphertext = output.enc_ciphertext()?;
-    let enc_ciphertext_ref = enc_ciphertext.as_mut();
-
-    let (plaintext, tag) = extract_tag(enc_ciphertext_ref);
+    let (mut plaintext, tag) = extract_tag::<D>(&output.enc_ciphertext()?)?;
 
     ChaCha20Poly1305::new(key.as_ref().into())
-        .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext, &tag.into())
+        .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
         .ok()?;
 
-    let (compact, memo) = domain.extract_memo(&plaintext.as_ref().into());
+    let (compact, memo) = domain.split_plaintext_at_memo(&plaintext);
 
     let (note, to) = domain.parse_note_plaintext_without_memo_ovk(&pk_d, &compact)?;
 
@@ -675,12 +684,17 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     }
 }
 
+// FIXME: rename to split_ciphertext_at_tag? make it a method of ShieldedOutput trait?
 // Splits the AEAD tag from the ciphertext.
-fn extract_tag(enc_ciphertext: &mut [u8]) -> (&mut [u8], [u8; AEAD_TAG_SIZE]) {
-    let tag_loc = enc_ciphertext.len() - AEAD_TAG_SIZE;
+fn extract_tag<D: Domain>(
+    enc_ciphertext: &D::NoteCiphertextBytes,
+) -> Option<(D::NotePlaintextBytes, [u8; AEAD_TAG_SIZE])> {
+    let enc_ciphertext = enc_ciphertext.as_ref();
+    let tag_loc = enc_ciphertext.len().checked_sub(AEAD_TAG_SIZE)?;
 
-    let (plaintext, tail) = enc_ciphertext.split_at_mut(tag_loc);
+    let (plaintext, tail) = enc_ciphertext.split_at(tag_loc);
 
-    let tag: [u8; AEAD_TAG_SIZE] = tail.as_ref().try_into().unwrap();
-    (plaintext, tag)
+    let tag: [u8; AEAD_TAG_SIZE] = tail.try_into().expect("tag is correct length");
+
+    D::parse_note_plaintext_bytes(plaintext).map(|plaintext| (plaintext, tag))
 }
