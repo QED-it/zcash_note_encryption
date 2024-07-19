@@ -39,6 +39,7 @@ use subtle::{Choice, ConstantTimeEq};
 #[cfg(feature = "alloc")]
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub mod batch;
+pub mod note_bytes;
 
 /// The size of the memo.
 pub const MEMO_SIZE: usize = 512;
