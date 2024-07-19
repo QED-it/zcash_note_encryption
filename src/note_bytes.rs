@@ -23,7 +23,10 @@ impl<const N: usize> From<&[u8]> for NoteBytes<N> {
 
 impl<const N: usize> From<(&[u8], &[u8])> for NoteBytes<N> {
     fn from(s: (&[u8], &[u8])) -> Self {
-        Self([s.0, s.1].concat().try_into().unwrap())
+        let mut result: [u8; N]  = [0; N];
+        result.copy_from_slice(s.0);
+        result[s.0.len()..].copy_from_slice(s.1);
+        NoteBytes::from(result.as_ref())
     }
 }
 
