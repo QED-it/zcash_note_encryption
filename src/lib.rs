@@ -40,6 +40,14 @@ use subtle::{Choice, ConstantTimeEq};
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub mod batch;
 
+/// The size of a compact note.
+pub const COMPACT_NOTE_SIZE: usize = 1 + // version
+    11 + // diversifier
+    8  + // value
+    32; // rseed (or rcm prior to ZIP 212)
+/// The size of [`NotePlaintextBytes`].
+pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
+
 /// The size of the memo.
 pub const MEMO_SIZE: usize = 512;
 /// The size of the authentication tag used for note encryption.
@@ -50,6 +58,9 @@ pub const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
     32; // esk
 /// The size of an encrypted outgoing plaintext.
 pub const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
+
+/// The size of an encrypted note plaintext.
+pub const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
 
 /// A symmetric key that can be used to recover a single Sapling or Orchard output.
 pub struct OutgoingCipherKey(pub [u8; 32]);
@@ -118,6 +129,41 @@ enum NoteValidity {
     Invalid,
 }
 
+/// Represents a fixed-size array of bytes for note components.
+#[derive(Clone, Copy, Debug)]
+pub struct NoteBytesData<const N: usize>(pub [u8; N]);
+
+impl<const N: usize> AsRef<[u8]> for NoteBytesData<N> {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl<const N: usize> AsMut<[u8]> for NoteBytesData<N> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
+}
+
+/// Provides a unified interface for handling fixed-size byte arrays used in note encryption.
+pub trait NoteBytes: AsRef<[u8]> + AsMut<[u8]> + Clone + Copy {}
+
+impl<const N: usize> NoteBytes for NoteBytesData<N> {}
+
+pub struct CompactNoteCiphertextBytes<'a>(&'a [u8]);
+
+impl<'a> AsRef<[u8]> for CompactNoteCiphertextBytes<'a> {
+    fn as_ref(&self) -> &[u8] {
+        self.0
+    }
+}
+
+impl<'a> From<&'a [u8]> for CompactNoteCiphertextBytes<'a> {
+    fn from(bytes: &'a [u8]) -> Self {
+        CompactNoteCiphertextBytes(bytes)
+    }
+}
+
 /// Trait that encapsulates protocol-specific note encryption types and logic.
 ///
 /// This trait enables most of the note encryption logic to be shared between Sapling and
@@ -138,15 +184,9 @@ pub trait Domain {
     type ExtractedCommitmentBytes: Eq + for<'a> From<&'a Self::ExtractedCommitment>;
     type Memo;
 
-    // FIXME: having four new parse_... methods of the trait cause a code duplication in
-    // the trait implementation. Now we use NoteBytes trait that constainted by all thoose ArRef,
-    // AsMut, From and NoteBytesData generic struct that implement NoteBytes for any length
-    type NotePlaintextBytes: AsMut<[u8]>;
-    // FIXME: [u8; AEAD_TAG_SIZE] instead of &[u8] doesn't give any benefit (except type/size
-    // safety) as we will need to allocalte memory for NoteCiphertextBytes anyway
-    type NoteCiphertextBytes: AsRef<[u8]>;
-    type CompactNotePlaintextBytes: AsMut<[u8]> + From<&[u8>>;//Self::CompactNoteCiphertextBytes>;
-    type CompactNoteCiphertextBytes: AsRef<[u8]>;
+    type NotePlaintextBytes: NoteBytes;
+    type NoteCiphertextBytes: NoteBytes;
+    type CompactNotePlaintextBytes: NoteBytes;
 
     /// Derives the `EphemeralSecretKey` corresponding to this note.
     ///
@@ -269,7 +309,7 @@ pub trait Domain {
     fn split_plaintext_at_memo(
         &self,
         plaintext: &Self::NotePlaintextBytes,
-    ) -> (Self::CompactNotePlaintextBytes, Self::Memo);
+    ) -> Option<(Self::CompactNotePlaintextBytes, Self::Memo)>;
 
     /// Parses the `DiversifiedTransmissionKey` field of the outgoing plaintext.
     ///
@@ -283,14 +323,32 @@ pub trait Domain {
     /// `EphemeralSecretKey`.
     fn extract_esk(out_plaintext: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey>;
 
-    // FIXME: add doc
+    /// Parses the given note plaintext bytes.
+    ///
+    /// Returns `None` if the byte slice does not represent a valid note plaintext.
     fn parse_note_plaintext_bytes(plaintext: &[u8]) -> Option<Self::NotePlaintextBytes>;
 
-    // FIXME: add doc
+    /// Parses the given note ciphertext bytes.
+    ///
+    /// `output` is the ciphertext bytes, and `tag` is the authentication tag.
+    ///
+    /// Returns `None` if the byte slice does not represent a valid note ciphertext.
     fn parse_note_ciphertext_bytes(
         output: &[u8],
         tag: [u8; AEAD_TAG_SIZE],
     ) -> Option<Self::NoteCiphertextBytes>;
+
+    /// Parses the given compact note plaintext bytes.
+    ///
+    /// Returns `None` if the byte slice does not represent a valid compact note plaintext.
+    fn parse_compact_note_plaintext_bytes(
+        plaintext: &[u8],
+    ) -> Option<Self::CompactNotePlaintextBytes>;
+
+    /// Parses the given compact note ciphertext bytes.
+    ///
+    /// Returns `None` if the byte slice does not represent a valid compact note ciphertext.
+    fn parse_compact_note_ciphertext_bytes(plaintext: &[u8]) -> CompactNoteCiphertextBytes;
 }
 
 /// Trait that encapsulates protocol-specific batch trial decryption logic.
@@ -350,7 +408,7 @@ pub trait ShieldedOutput<D: Domain> {
     // FIXME: we can't return a ref to CompactNoteCiphertextBytes as it's not a member or self or
     // a static object
     /// Exposes the compact note ciphertext of the output.
-    fn enc_ciphertext_compact(&self) -> D::CompactNoteCiphertextBytes;
+    fn enc_ciphertext_compact(&self) -> CompactNoteCiphertextBytes;
 }
 
 /// A struct containing context required for encrypting Sapling and Orchard notes.
@@ -498,7 +556,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
         .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
         .ok()?;
 
-    let (compact, memo) = domain.split_plaintext_at_memo(&plaintext);
+    let (compact, memo) = domain.split_plaintext_at_memo(&plaintext)?;
     let (note, to) = parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
@@ -584,7 +642,8 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient)> {
     // Start from block 1 to skip over Poly1305 keying output
-    let mut plaintext: D::CompactNotePlaintextBytes = output.enc_ciphertext_compact().into();
+    let mut plaintext: D::CompactNotePlaintextBytes =
+        D::parse_compact_note_plaintext_bytes(output.enc_ciphertext_compact().as_ref())?;
 
     let mut keystream = ChaCha20::new(key.as_ref().into(), [0u8; 12][..].into());
     keystream.seek(64);
@@ -662,7 +721,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
         .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
         .ok()?;
 
-    let (compact, memo) = domain.split_plaintext_at_memo(&plaintext);
+    let (compact, memo) = domain.split_plaintext_at_memo(&plaintext)?;
 
     let (note, to) = domain.parse_note_plaintext_without_memo_ovk(&pk_d, &compact)?;
 
