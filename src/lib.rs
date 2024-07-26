@@ -150,20 +150,6 @@ pub trait NoteBytes: AsRef<[u8]> + AsMut<[u8]> + Clone + Copy {}
 
 impl<const N: usize> NoteBytes for NoteBytesData<N> {}
 
-pub struct CompactNoteCiphertextBytes<'a>(&'a [u8]);
-
-impl<'a> AsRef<[u8]> for CompactNoteCiphertextBytes<'a> {
-    fn as_ref(&self) -> &[u8] {
-        self.0
-    }
-}
-
-impl<'a> From<&'a [u8]> for CompactNoteCiphertextBytes<'a> {
-    fn from(bytes: &'a [u8]) -> Self {
-        CompactNoteCiphertextBytes(bytes)
-    }
-}
-
 /// Trait that encapsulates protocol-specific note encryption types and logic.
 ///
 /// This trait enables most of the note encryption logic to be shared between Sapling and
@@ -187,6 +173,7 @@ pub trait Domain {
     type NotePlaintextBytes: NoteBytes;
     type NoteCiphertextBytes: NoteBytes;
     type CompactNotePlaintextBytes: NoteBytes;
+    type CompactNoteCiphertextBytes<'a>: From<&'a [u8]> + AsRef<[u8]>;
 
     /// Derives the `EphemeralSecretKey` corresponding to this note.
     ///
@@ -348,7 +335,9 @@ pub trait Domain {
     /// Parses the given compact note ciphertext bytes.
     ///
     /// Returns `None` if the byte slice does not represent a valid compact note ciphertext.
-    fn parse_compact_note_ciphertext_bytes(plaintext: &[u8]) -> CompactNoteCiphertextBytes;
+    fn parse_compact_note_ciphertext_bytes(
+        plaintext: &[u8],
+    ) -> Self::CompactNoteCiphertextBytes<'_>;
 }
 
 /// Trait that encapsulates protocol-specific batch trial decryption logic.
@@ -403,12 +392,10 @@ pub trait ShieldedOutput<D: Domain> {
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
 
     /// Exposes the note ciphertext of the output. Returns `None` if the output is compact.
-    fn enc_ciphertext(&self) -> Option<D::NoteCiphertextBytes>;
+    fn enc_ciphertext(&self) -> Option<&D::NoteCiphertextBytes>;
 
-    // FIXME: we can't return a ref to CompactNoteCiphertextBytes as it's not a member or self or
-    // a static object
     /// Exposes the compact note ciphertext of the output.
-    fn enc_ciphertext_compact(&self) -> CompactNoteCiphertextBytes;
+    fn enc_ciphertext_compact(&self) -> D::CompactNoteCiphertextBytes<'_>;
 }
 
 /// A struct containing context required for encrypting Sapling and Orchard notes.
@@ -550,7 +537,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     output: &Output,
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    let (mut plaintext, tag) = extract_tag::<D>(&output.enc_ciphertext()?)?;
+    let (mut plaintext, tag) = extract_tag::<D>(output.enc_ciphertext()?)?;
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
@@ -715,7 +702,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    let (mut plaintext, tag) = extract_tag::<D>(&output.enc_ciphertext()?)?;
+    let (mut plaintext, tag) = extract_tag::<D>(output.enc_ciphertext()?)?;
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
