@@ -54,6 +54,13 @@ pub trait NoteBytes:
     + Copy
     + Send
 {
+    /// Constructs a new NoteBytesData from an empty slice of bytes.
+    fn new() -> Self;
 }
 
-impl<const N: usize> NoteBytes for NoteBytesData<N> {}
+impl<const N: usize> NoteBytes for NoteBytesData<N> {
+    /// Constructs a new NoteBytesData from an empty slice of bytes.
+    fn new() -> Self {
+        Self([0u8; N])
+    }
+}
