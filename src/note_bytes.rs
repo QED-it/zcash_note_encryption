@@ -40,7 +40,7 @@ impl<const N: usize> NoteBytes for NoteBytesData<N> {
             return None;
         }
 
-        let mut data: [u8; N] = [0; N];
+        let mut data = [0u8; N];
 
         data[..expected_output_len].copy_from_slice(output);
         data[expected_output_len..].copy_from_slice(&tag);

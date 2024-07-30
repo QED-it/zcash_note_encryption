@@ -367,15 +367,11 @@ pub trait ShieldedOutput<D: Domain> {
     /// Exposes the `cmu_bytes` or `cmx_bytes` field of the output.
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
 
-    // FIXME: we can't return a ref to NoteCiphertextBytes as it's not a member of self or
-    // a static object in saplic-crypto crate (but it is a mamber of self in orchard crate)
-    // Should we really need to return Option here?
     /// Exposes the note ciphertext of the output. Returns `None` if the output is compact.
     fn enc_ciphertext(&self) -> Option<D::NoteCiphertextBytes>;
 
-    // FIXME: we can't return a ref to CompactNoteCiphertextBytes as it's not a member of self or
-    // a static object neither in orchard nor in saplic-crypto crate
-    // FIXME: Should we return Option<...> instead?
+    // FIXME: Should we return `Option<D::CompactNoteCiphertextBytes>` or
+    // `&D::CompactNoteCiphertextBytes` instead? (complexity)?
     /// Exposes the compact note ciphertext of the output.
     fn enc_ciphertext_compact(&self) -> D::CompactNoteCiphertextBytes;
 }
@@ -453,7 +449,7 @@ impl<D: Domain> NoteEncryption<D> {
         let tag = ChaCha20Poly1305::new(key.as_ref().into())
             .encrypt_in_place_detached([0u8; 12][..].into(), &[], output)
             .unwrap();
-        D::parse_note_ciphertext_bytes(output, tag.into()).expect("output is correct length")
+        D::parse_note_ciphertext_bytes(output, tag.into()).expect("the output length is correct")
     }
 
     /// Generates `outCiphertext` for this note.
@@ -519,7 +515,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     output: &Output,
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    let (mut plaintext, tag) = extract_tag::<D>(&output.enc_ciphertext()?)?;
+    let (mut plaintext, tag) = split_ciphertext_at_tag::<D>(&output.enc_ciphertext()?)?;
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
@@ -684,7 +680,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    let (mut plaintext, tag) = extract_tag::<D>(&output.enc_ciphertext()?)?;
+    let (mut plaintext, tag) = split_ciphertext_at_tag::<D>(&output.enc_ciphertext()?)?;
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
@@ -712,9 +708,9 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     }
 }
 
-// FIXME: rename to split_ciphertext_at_tag? make it a method of ShieldedOutput trait?
+// FIXME: make it a method of ShieldedOutput trait?
 // Splits the AEAD tag from the ciphertext.
-fn extract_tag<D: Domain>(
+fn split_ciphertext_at_tag<D: Domain>(
     enc_ciphertext: &D::NoteCiphertextBytes,
 ) -> Option<(D::NotePlaintextBytes, [u8; AEAD_TAG_SIZE])> {
     let enc_ciphertext = enc_ciphertext.as_ref();
@@ -722,7 +718,7 @@ fn extract_tag<D: Domain>(
 
     let (plaintext, tail) = enc_ciphertext.split_at(tag_loc);
 
-    let tag: [u8; AEAD_TAG_SIZE] = tail.try_into().expect("tag is correct length");
+    let tag: [u8; AEAD_TAG_SIZE] = tail.try_into().expect("the length of the tag is correct");
 
     D::parse_note_plaintext_bytes(plaintext).map(|plaintext| (plaintext, tag))
 }
