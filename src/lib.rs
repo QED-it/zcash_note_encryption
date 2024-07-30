@@ -44,12 +44,12 @@ pub mod note_bytes;
 
 use note_bytes::NoteBytes;
 
-/// The size of a compact note.
+/// The size of a compact note for Sapling and Orchard Vanilla.
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
     11 + // diversifier
     8  + // value
     32; // rseed (or rcm prior to ZIP 212)
-/// The size of [`NotePlaintextBytes`].
+/// The size of `NotePlaintextBytes` for Sapling and Orchard Vanilla.
 pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
 
 /// The size of the memo.
@@ -63,7 +63,7 @@ pub const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
 /// The size of an encrypted outgoing plaintext.
 pub const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
 
-/// The size of an encrypted note plaintext.
+/// The size of an encrypted note plaintext for Sapling and Orchard Vanilla.
 pub const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
 
 /// A symmetric key that can be used to recover a single Sapling or Orchard output.
