@@ -374,6 +374,21 @@ pub trait ShieldedOutput<D: Domain> {
     // `&D::CompactNoteCiphertextBytes` instead? (complexity)?
     /// Exposes the compact note ciphertext of the output.
     fn enc_ciphertext_compact(&self) -> D::CompactNoteCiphertextBytes;
+
+    //// Splits the AEAD tag from the ciphertext.
+    fn split_ciphertext_at_tag(&self) -> Option<(D::NotePlaintextBytes, [u8; AEAD_TAG_SIZE])> {
+        let enc_ciphertext = self.enc_ciphertext()?;
+        let enc_ciphertext_bytes = enc_ciphertext.as_ref();
+
+        let (plaintext, tail) = enc_ciphertext_bytes
+            .len()
+            .checked_sub(AEAD_TAG_SIZE)
+            .map(|tag_loc| enc_ciphertext_bytes.split_at(tag_loc))?;
+
+        let tag: [u8; AEAD_TAG_SIZE] = tail.try_into().expect("the length of the tag is correct");
+
+        D::parse_note_plaintext_bytes(plaintext).map(|plaintext| (plaintext, tag))
+    }
 }
 
 /// A struct containing context required for encrypting Sapling and Orchard notes.
@@ -515,7 +530,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     output: &Output,
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    let (mut plaintext, tag) = split_ciphertext_at_tag::<D>(&output.enc_ciphertext()?)?;
+    let (mut plaintext, tag) = output.split_ciphertext_at_tag()?;
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
@@ -680,7 +695,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    let (mut plaintext, tag) = split_ciphertext_at_tag::<D>(&output.enc_ciphertext()?)?;
+    let (mut plaintext, tag) = output.split_ciphertext_at_tag()?;
 
     ChaCha20Poly1305::new(key.as_ref().into())
         .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext.as_mut(), &tag.into())
@@ -706,19 +721,4 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     } else {
         None
     }
-}
-
-// FIXME: make it a method of ShieldedOutput trait?
-// Splits the AEAD tag from the ciphertext.
-fn split_ciphertext_at_tag<D: Domain>(
-    enc_ciphertext: &D::NoteCiphertextBytes,
-) -> Option<(D::NotePlaintextBytes, [u8; AEAD_TAG_SIZE])> {
-    let enc_ciphertext = enc_ciphertext.as_ref();
-    let tag_loc = enc_ciphertext.len().checked_sub(AEAD_TAG_SIZE)?;
-
-    let (plaintext, tail) = enc_ciphertext.split_at(tag_loc);
-
-    let tag: [u8; AEAD_TAG_SIZE] = tail.try_into().expect("the length of the tag is correct");
-
-    D::parse_note_plaintext_bytes(plaintext).map(|plaintext| (plaintext, tag))
 }
