@@ -49,7 +49,7 @@ pub const COMPACT_NOTE_SIZE: usize = 1 + // version
     11 + // diversifier
     8  + // value
     32; // rseed (or rcm prior to ZIP 212)
-/// The size of [`NotePlaintextBytes`] for Sapling and pre-ZSA Orchard.
+/// The size of [`Domain::NotePlaintextBytes`] for Sapling and pre-ZSA Orchard.
 pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
 /// The size of [`OutPlaintextBytes`].
 pub const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
