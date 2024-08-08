@@ -374,7 +374,7 @@ pub trait ShieldedOutput<D: Domain> {
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
 
     /// Exposes the note ciphertext of the output. Returns `None` if the output is compact.
-    fn enc_ciphertext(&self) -> Option<D::NoteCiphertextBytes>;
+    fn enc_ciphertext(&self) -> Option<&D::NoteCiphertextBytes>;
 
     // FIXME: Should we return `Option<D::CompactNoteCiphertextBytes>` or
     // `&D::CompactNoteCiphertextBytes` instead? (complexity)?
@@ -383,8 +383,7 @@ pub trait ShieldedOutput<D: Domain> {
 
     //// Splits the AEAD tag from the ciphertext.
     fn split_ciphertext_at_tag(&self) -> Option<(D::NotePlaintextBytes, [u8; AEAD_TAG_SIZE])> {
-        let enc_ciphertext = self.enc_ciphertext()?;
-        let enc_ciphertext_bytes = enc_ciphertext.as_ref();
+        let enc_ciphertext_bytes = self.enc_ciphertext()?.as_ref();
 
         let (plaintext, tail) = enc_ciphertext_bytes
             .len()
