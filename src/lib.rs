@@ -264,7 +264,8 @@ pub trait Domain {
         plaintext: &Self::CompactNotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)>;
 
-    /// Splits the memo field from the given note plaintext.
+    /// Splits the given note plaintext into the compact part (containing the note) and
+    /// the memo field.
     ///
     /// # Compatibility
     ///
