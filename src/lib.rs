@@ -44,19 +44,10 @@ pub mod note_bytes;
 
 use note_bytes::NoteBytes;
 
-/// The size of a compact note for Sapling and pre-ZSA Orchard.
-pub const COMPACT_NOTE_SIZE: usize = 1 + // version
-    11 + // diversifier
-    8  + // value
-    32; // rseed (or rcm prior to ZIP 212)
-/// The size of [`Domain::NotePlaintextBytes`] for Sapling and pre-ZSA Orchard.
-pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
 /// The size of [`OutPlaintextBytes`].
 pub const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
     32; // esk
 const AEAD_TAG_SIZE: usize = 16;
-/// The size of an encrypted note plaintext for Sapling and pre-ZSA Orchard.
-pub const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
 /// The size of an encrypted outgoing plaintext.
 pub const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
 
