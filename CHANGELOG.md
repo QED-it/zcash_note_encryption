@@ -7,9 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Changed
-- Breaking change: removed the constants `COMPACT_NOTE_SIZE`,
-  `NOTE_PLAINTEXT_SIZE`, and `ENC_CIPHERTEXT_SIZE` as they are no longer used
-  in the `zcash_note_encryption`, orchard`, or `sapling-crypto` crates.
+- **Breaking change:** removed the constants `COMPACT_NOTE_SIZE`,
+  `NOTE_PLAINTEXT_SIZE`, and `ENC_CIPHERTEXT_SIZE` as they are now
+  implementation spesific (located in `orchard` and `sapling-crypto` crates).
 - Generalized the note plaintext size to support variable sizes by adding the
   abstract types `NotePlaintextBytes`, `NoteCiphertextBytes`,
   `CompactNotePlaintextBytes`, and `CompactNoteCiphertextBytes` to the `Domain`
@@ -25,8 +25,7 @@ and this library adheres to Rust's notion of
   array.
 - Updated the `enc_ciphertext` method of the `ShieldedOutput` trait to return an
   `Option` of a reference instead of a copy.
-- Moved the specific constants into the `Domain` trait implementations.
-- Added new `note_bytes` module with helper trait and struct to deal with note
+- Added a new `note_bytes` module with helper trait and struct to deal with note
   bytes data with abstracted underlying array size.
   
 ## [0.4.0] - 2023-06-06
