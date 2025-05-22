@@ -9,7 +9,7 @@ and this library adheres to Rust's notion of
 ### Changed
 - **Breaking change:** removed the constants `COMPACT_NOTE_SIZE`,
   `NOTE_PLAINTEXT_SIZE`, and `ENC_CIPHERTEXT_SIZE` as they are now
-  implementation spesific (located in `orchard` and `sapling-crypto` crates).
+  implementation-specific (located in `orchard` and `sapling-crypto` crates).
 - Generalized the note plaintext size to support variable sizes by adding the
   abstract types `NotePlaintextBytes`, `NoteCiphertextBytes`,
   `CompactNotePlaintextBytes`, and `CompactNoteCiphertextBytes` to the `Domain`
@@ -27,7 +27,11 @@ and this library adheres to Rust's notion of
   `Option` of a reference instead of a copy.
 - Added a new `note_bytes` module with helper trait and struct to deal with note
   bytes data with abstracted underlying array size.
-  
+
+## [0.4.1] - 2024-12-06
+### Added
+- `zcash_note_encryption::try_output_recovery_with_pkd_esk`
+
 ## [0.4.0] - 2023-06-06
 ### Changed
 - The `esk` and `ephemeral_key` arguments have been removed from 

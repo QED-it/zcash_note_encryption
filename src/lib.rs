@@ -5,11 +5,11 @@
 //! and trial decryption logic, and enforce protocol-agnostic verification requirements.
 //!
 //! Protocol-specific logic is handled via the [`Domain`] trait. Implementations of this
-//! trait are provided in the [`zcash_primitives`] (for Sapling) and [`orchard`] crates;
-//! users with their own existing types can similarly implement the trait themselves.
+//! trait are provided in the [`sapling-crypto`] and [`orchard`] crates; users with their
+//! own existing types can similarly implement the trait themselves.
 //!
 //! [in-band secret distribution scheme]: https://zips.z.cash/protocol/protocol.pdf#saplingandorchardinband
-//! [`zcash_primitives`]: https://crates.io/crates/zcash_primitives
+//! [`sapling-crypto`]: https://crates.io/crates/sapling-crypto
 //! [`orchard`]: https://crates.io/crates/orchard
 
 #![no_std]
@@ -281,7 +281,7 @@ pub trait Domain {
 
     /// Parses the given note plaintext bytes.
     ///
-    /// Returns `None` if the byte slice does not represent a valid note plaintext.
+    /// Returns `None` if the byte slice has the wrong length for a note plaintext.
     fn parse_note_plaintext_bytes(plaintext: &[u8]) -> Option<Self::NotePlaintextBytes> {
         Self::NotePlaintextBytes::from_slice(plaintext)
     }
@@ -290,7 +290,7 @@ pub trait Domain {
     ///
     /// `output` is the ciphertext bytes, and `tag` is the authentication tag.
     ///
-    /// Returns `None` if the byte slice does not represent a valid note ciphertext.
+    /// Returns `None` if the `output` byte slice has the wrong length for a note ciphertext.
     fn parse_note_ciphertext_bytes(
         output: &[u8],
         tag: [u8; AEAD_TAG_SIZE],
@@ -300,7 +300,7 @@ pub trait Domain {
 
     /// Parses the given compact note plaintext bytes.
     ///
-    /// Returns `None` if the byte slice does not represent a valid compact note plaintext.
+    /// Returns `None` if the byte slice has the wrong length for a compact note plaintext.
     fn parse_compact_note_plaintext_bytes(
         plaintext: &[u8],
     ) -> Option<Self::CompactNotePlaintextBytes> {
@@ -368,17 +368,24 @@ pub trait ShieldedOutput<D: Domain> {
     fn enc_ciphertext_compact(&self) -> D::CompactNoteCiphertextBytes;
 
     //// Splits the AEAD tag from the ciphertext.
+    ///
+    /// Returns `None` if the output is compact.
     fn split_ciphertext_at_tag(&self) -> Option<(D::NotePlaintextBytes, [u8; AEAD_TAG_SIZE])> {
         let enc_ciphertext_bytes = self.enc_ciphertext()?.as_ref();
 
-        let (plaintext, tail) = enc_ciphertext_bytes
+        let tag_loc = enc_ciphertext_bytes
             .len()
             .checked_sub(AEAD_TAG_SIZE)
-            .map(|tag_loc| enc_ciphertext_bytes.split_at(tag_loc))?;
+            .expect("D::CompactNoteCiphertextBytes should be at least AEAD_TAG_SIZE bytes");
+        let (plaintext, tail) = enc_ciphertext_bytes.split_at(tag_loc);
 
         let tag: [u8; AEAD_TAG_SIZE] = tail.try_into().expect("the length of the tag is correct");
 
-        D::parse_note_plaintext_bytes(plaintext).map(|plaintext| (plaintext, tag))
+        Some((
+            D::parse_note_plaintext_bytes(plaintext)
+                .expect("D::NoteCiphertextBytes and D::NotePlaintextBytes should be consistent"),
+            tag,
+        ))
     }
 }
 
@@ -679,6 +686,24 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     let pk_d = D::extract_pk_d(&op)?;
     let esk = D::extract_esk(&op)?;
 
+    try_output_recovery_with_pkd_esk(domain, pk_d, esk, output)
+}
+
+/// Recovery of the full note plaintext by the sender.
+///
+/// Attempts to decrypt and validate the given shielded output using the given `pk_d` and `esk`. If
+/// successful, the corresponding note and memo are returned, along with the address to which the
+/// note was sent.
+///
+/// Implements part of section 4.19.3 of the
+/// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk).
+/// For decryption using a Full Viewing Key see [`try_output_recovery_with_ovk`].
+pub fn try_output_recovery_with_pkd_esk<D: Domain, Output: ShieldedOutput<D>>(
+    domain: &D,
+    pk_d: D::DiversifiedTransmissionKey,
+    esk: D::EphemeralSecretKey,
+    output: &Output,
+) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let ephemeral_key = output.ephemeral_key();
     let shared_secret = D::ka_agree_enc(&esk, &pk_d);
     // The small-order point check at the point of output parsing rejects
